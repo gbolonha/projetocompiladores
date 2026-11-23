@@ -1,0 +1,15 @@
+algoritmo aninhado;
+var i, c: inteiro;
+inicio
+    i := 1;
+    c := 0;
+    enquanto i <= 10 faca
+    inicio
+        se i - (i div 2) * 2 = 0 entao
+            c := c + 1;
+        i := i + 1
+    fim;
+    escreva(c);
+    se c > 0 entao
+        se c > 9 entao escreva(1) senao escreva(2)
+fim.

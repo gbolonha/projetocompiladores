@@ -7,7 +7,7 @@
 #include <string.h>
 
 // Para compilar:
-// gcc -Wall -Wno-unused-result -g -Og compilador.c -o compilador
+// gcc -Wall -Wno-unused-result -g -Og compilador.c hash_mack.o -o compilador
 // Para executar:
 // ./compilador arquivo.txt
 
@@ -58,6 +58,152 @@ typedef struct {
         char ch;     // atributo do átomo constchar (constante caractere)
     } atributo;
 } TInfoAtomo;
+
+//FASE 2 (TABELA DE SIMBOLOS)---------------------------------------------------------
+typedef enum {
+    CAT_VARIAVEL,
+    CAT_PARAMETRO,
+    CAT_FUNCAO,
+    CAT_PROCEDIMENTO,
+    CAT_PROGRAMA
+} TCategoria;
+
+typedef struct TNo {
+    char id[16];
+    int endereco;
+    TCategoria categoria;
+    int escopo;
+    int rotulo;
+    int nParams;
+    int porRef;
+    int fechado;
+    char refs[32];
+    struct TNo *prox;
+} TNo;
+
+#define PRIME_NUMBER 211
+#define ESCOPO_GLOBAL 0
+#define ESCOPO_LOCAL 1
+
+typedef struct {
+    TNo *tabela[PRIME_NUMBER];
+} TTabelaSimbolos;
+
+int hashMack(char *s);
+
+
+TTabelaSimbolos tabelaSimbolos;
+
+void inicializaTS(void)
+{
+    int i;
+
+    for (i = 0; i < PRIME_NUMBER; i++)
+    {
+        tabelaSimbolos.tabela[i] = NULL;
+    }
+}
+
+TNo *buscaTS(char *id, int escopo)
+{
+    int pos=hashMack(id);
+    TNo *atual=tabelaSimbolos.tabela[pos];
+
+    while(atual!=NULL)
+    {
+        
+        if (strcmp(atual->id, id) == 0 && atual->escopo == escopo && atual->fechado == 0)
+        {
+            return atual;
+        }
+        
+        atual=atual->prox;
+    }
+
+    return NULL;
+}
+
+
+int insereTS(char *id, TCategoria categoria, int escopo, int endereco)
+{
+    TNo *novo;
+    int pos=hashMack(id);
+
+    if(buscaTS(id,escopo)!=NULL)
+    {
+        return 0;
+    }
+
+    novo=malloc(sizeof(TNo));
+    if(novo==NULL)
+    {
+        return 0;
+    }
+
+    strcpy(novo->id,id);
+    novo->endereco=endereco;
+    novo->categoria=categoria;
+    novo->escopo=escopo;
+    novo->rotulo=0;
+    novo->nParams=0;
+    novo->porRef=0;
+    novo->fechado=0;
+    memset(novo->refs, 0, sizeof(novo->refs));
+
+    novo->prox = tabelaSimbolos.tabela[pos];
+    tabelaSimbolos.tabela[pos] = novo;
+
+    return 1;
+}
+
+void imprimeTS()
+{
+    TNo *atual;
+    char *categorias[] = {
+    "Variavel",
+    "Parametro",
+    "Funcao",
+    "Procedimento",
+    "Programa"
+    };
+    printf("\nEntrada\tID\tCategoria\tEscopo\tEndereco\n");
+    for (int i=0;i<PRIME_NUMBER;i++)
+    {
+        atual=tabelaSimbolos.tabela[i];
+        while (atual!=NULL)
+        {
+            printf("%d\t%s\t%s\t",i,atual->id,categorias[atual->categoria]);
+            if(atual->categoria==CAT_VARIAVEL||atual->categoria==CAT_PARAMETRO)
+            {
+                printf("%d\t%d\n",atual->escopo,atual->endereco);
+            }
+            else
+            {
+                printf("-\t-\n");
+            }
+            atual=atual->prox;
+        }
+    }
+}
+
+
+
+int escopoAtual = ESCOPO_GLOBAL;
+
+int proximoEnderecoGlobal = 0;
+int proximoEnderecoLocal = 0;
+int rotulo = 1;
+int qtdParams = 0;
+int qtdArgs = 0;
+char idComando[16];
+int linhaComando;
+TNo *rotinaAtual;
+TNo *rotinaChamada;
+int paramRef = 0;
+
+//Analise Semantica=====================
+
+//=======================================
 
 char *strAtomo[] = {
     "algoritmo",       // 0
@@ -132,7 +278,7 @@ void consome(TAtomo atomo);
 void programa(void);
 void bloco(void);
 void declaracao_variaveis(void);
-void lista_variaveis(void);
+void lista_variaveis(TCategoria categoria);
 void tipo(void);
 void declaracao_de_rotinas(void);
 void declaracao_de_funcao(void);
@@ -166,6 +312,20 @@ TAtomo lookahead;
 
 void libera_buffer(void)
 {
+    TNo *p, *q;
+    int i;
+
+    for (i = 0; i < PRIME_NUMBER; i++)
+    {
+        p = tabelaSimbolos.tabela[i];
+        while (p != NULL)
+        {
+            q = p->prox;
+            free(p);
+            p = q;
+        }
+    }
+
     free(inicio_buffer);
 
     if (arquivo_global != NULL)
@@ -174,6 +334,7 @@ void libera_buffer(void)
 
 int main(int argc, char *argv[])
 {
+    inicializaTS();
     FILE *arquivo;
     long tamanho;
 
@@ -206,14 +367,13 @@ int main(int argc, char *argv[])
 
     while (lookahead == COMENTARIO)
     {
-        imprime_atomo(info_atomo);
         info_atomo = obter_atomo();
         lookahead = info_atomo.atomo;
     }
 
     programa();
 
-    printf("%d linhas analisadas, programa sintaticamente correto\n", contaLinha);
+    imprimeTS();
 
    
     arquivo = NULL;
@@ -662,22 +822,19 @@ void consome(TAtomo atomo)
 {
     while (lookahead == COMENTARIO)
     {
-        imprime_atomo(info_atomo);
         info_atomo = obter_atomo();
         lookahead = info_atomo.atomo;
     }
 
     if (lookahead == atomo)
     {
-        imprime_atomo(info_atomo);
 
         info_atomo = obter_atomo();
         lookahead = info_atomo.atomo;
 
         while (lookahead == COMENTARIO)
         {
-            imprime_atomo(info_atomo);
-            info_atomo = obter_atomo();
+                info_atomo = obter_atomo();
             lookahead = info_atomo.atomo;
         }
     }
@@ -692,18 +849,46 @@ void consome(TAtomo atomo)
 // <programa> ::= algoritmo identificador ‘;’ <bloco> ‘.’
 void programa(void)
 {
-    consome(ALGORITMO); 
+    char id[16];
+    int linha;
+
+    consome(ALGORITMO);
+    strcpy(id, info_atomo.atributo.id);
+    linha = info_atomo.linha;
     consome(IDENTIFICADOR);
-    consome(PONTO_VIRGULA); 
+    if (!insereTS(id, CAT_PROGRAMA, ESCOPO_GLOBAL, -1))
+    {
+        printf("# %d:erro semantico, identificador %s ja declarado\n", linha, id);
+        exit(1);
+    }
+    consome(PONTO_VIRGULA);
+    printf("   INPP\n");
     bloco();
     consome(PONTO);
+    if (proximoEnderecoGlobal > 0)
+    {
+        printf("   DMEM %d\n", proximoEnderecoGlobal);
+    }
+    printf("   PARA\n");
 }
 
 // <bloco> ::= <declaração_variáveis> <declaração_de_rotinas> <comando_composto>
 void bloco(void)
 {
+    int L1 = rotulo++;
+
     declaracao_variaveis();
+    if (proximoEnderecoGlobal > 0)
+    {
+        printf("   AMEM %d\n", proximoEnderecoGlobal);
+    }
+    if (lookahead == FUNCAO || lookahead == PROCEDIMENTO)
+    {
+        printf("   DSVS L%d\n", L1);
+    }
     declaracao_de_rotinas();
+
+    printf("L%d:NADA\n", L1);
     comando_composto();
 }
 
@@ -713,26 +898,71 @@ void declaracao_variaveis(void)
     if (lookahead == VAR)
     {
         consome(VAR);
-        lista_variaveis();
+        lista_variaveis(CAT_VARIAVEL);
         consome(PONTO_VIRGULA);
 
         while (lookahead == IDENTIFICADOR)
         {
-            lista_variaveis();
+            lista_variaveis(CAT_VARIAVEL);
             consome(PONTO_VIRGULA);
         }
     }
 }
 
 // <lista_variaveis> ::= identificador { ‘,’ identificador } ‘:’ <tipo>
-void lista_variaveis(void)
+void lista_variaveis(TCategoria categoria)
 {
+    char id[16];
+    int linha;
+    int endereco;
+
+    strcpy(id, info_atomo.atributo.id);
+    linha = info_atomo.linha;
     consome(IDENTIFICADOR);
+
+    if (categoria == CAT_PARAMETRO)
+        endereco = ++qtdParams;
+    else if (escopoAtual == ESCOPO_GLOBAL)
+        endereco = proximoEnderecoGlobal++;
+    else
+        endereco = proximoEnderecoLocal++;
+
+    if (!insereTS(id, categoria, escopoAtual, endereco))
+    {
+        printf("# %d:erro semantico, identificador %s ja declarado\n", linha, id);
+        exit(1);
+    }
+    if (categoria == CAT_PARAMETRO && paramRef)
+    {
+        buscaTS(id, ESCOPO_LOCAL)->porRef = 1;
+        rotinaAtual->refs[endereco - 1] = 1;
+    }
 
     while (lookahead == VIRGULA)
     {
         consome(VIRGULA);
+
+        strcpy(id, info_atomo.atributo.id);
+        linha = info_atomo.linha;
         consome(IDENTIFICADOR);
+
+        if (categoria == CAT_PARAMETRO)
+            endereco = ++qtdParams;
+        else if (escopoAtual == ESCOPO_GLOBAL)
+            endereco = proximoEnderecoGlobal++;
+        else
+            endereco = proximoEnderecoLocal++;
+
+        if (!insereTS(id, categoria, escopoAtual, endereco))
+        {
+            printf("# %d:erro semantico, identificador %s ja declarado\n", linha, id);
+            exit(1);
+        }
+        if (categoria == CAT_PARAMETRO && paramRef)
+        {
+            buscaTS(id, ESCOPO_LOCAL)->porRef = 1;
+            rotinaAtual->refs[endereco - 1] = 1;
+        }
     }
 
     consome(DOIS_PONTOS);
@@ -758,22 +988,122 @@ void declaracao_de_rotinas(void)
 // <declaração_de_função> ::= funcao <tipo> identificador <parametros_formais> <declaracao_de_variaveis> <comando_composto>
 void declaracao_de_funcao(void)
 {
+    char id[16];
+    int linha;
+    int L1 = rotulo++;
+
     consome(FUNCAO);
     tipo();
+    strcpy(id, info_atomo.atributo.id);
+    linha = info_atomo.linha;
     consome(IDENTIFICADOR);
+    if (!insereTS(id, CAT_FUNCAO, ESCOPO_GLOBAL, -1))
+    {
+        printf("# %d:erro semantico, identificador %s ja declarado\n", linha, id);
+        exit(1);
+    }
+    rotinaAtual = buscaTS(id, ESCOPO_GLOBAL);
+    rotinaAtual->rotulo = L1;
+
+    escopoAtual = ESCOPO_LOCAL;
+    proximoEnderecoLocal = 0;
+    qtdParams = 0;
+    printf("L%d:NADA\n", L1);
+    printf("   ENPR\n");
     parametros_formais();
+
+    for (int i = 0; i < PRIME_NUMBER; i++)
+    {
+        for (TNo *p = tabelaSimbolos.tabela[i]; p != NULL; p = p->prox)
+        {
+            if (p->escopo == ESCOPO_LOCAL && p->categoria == CAT_PARAMETRO && p->endereco > 0)
+                p->endereco = p->endereco - qtdParams - 3;
+        }
+    }
+    rotinaAtual->nParams = qtdParams;
+
     declaracao_variaveis();
+    if (proximoEnderecoLocal > 0)
+    {
+        printf("   AMEM %d\n", proximoEnderecoLocal);
+    }
     comando_composto();
+
+    if (proximoEnderecoLocal > 0)
+    {
+        printf("   DMEM %d\n", proximoEnderecoLocal);
+    }
+    printf("   RTPR %d\n",qtdParams);
+
+    for (int i = 0; i < PRIME_NUMBER; i++)
+    {
+        for (TNo *p = tabelaSimbolos.tabela[i]; p != NULL; p = p->prox)
+        {
+            if (p->escopo == ESCOPO_LOCAL)
+                p->fechado = 1;
+        }
+    }
+    escopoAtual = ESCOPO_GLOBAL;
 }
 
 // <declaracao_de_procedimento> ::= procedimento identificador <parametros_formais> <declaracao_de_variaveis> <comando_composto>
 void declaracao_de_procedimento(void)
 {
+    char id[16];
+    int linha;
+    int L1 = rotulo++;
+
     consome(PROCEDIMENTO);
+    strcpy(id, info_atomo.atributo.id);
+    linha = info_atomo.linha;
     consome(IDENTIFICADOR);
+    if (!insereTS(id, CAT_PROCEDIMENTO, ESCOPO_GLOBAL, -1))
+    {
+        printf("# %d:erro semantico, identificador %s ja declarado\n", linha, id);
+        exit(1);
+    }
+    rotinaAtual = buscaTS(id, ESCOPO_GLOBAL);
+    rotinaAtual->rotulo = L1;
+
+    escopoAtual = ESCOPO_LOCAL;
+    proximoEnderecoLocal = 0;
+    qtdParams = 0;
+    printf("L%d:NADA\n", L1);
+    printf("   ENPR\n");
     parametros_formais();
+
+    for (int i = 0; i < PRIME_NUMBER; i++)
+    {
+        for (TNo *p = tabelaSimbolos.tabela[i]; p != NULL; p = p->prox)
+        {
+            if (p->escopo == ESCOPO_LOCAL && p->categoria == CAT_PARAMETRO && p->endereco > 0)
+                p->endereco = p->endereco - qtdParams - 3;
+        }
+    }
+    rotinaAtual->nParams = qtdParams;
+
     declaracao_variaveis();
+    if (proximoEnderecoLocal > 0)
+    {
+        printf("   AMEM %d\n", proximoEnderecoLocal);
+    }
     comando_composto();
+
+    if (proximoEnderecoLocal > 0)
+    {
+        printf("   DMEM %d\n", proximoEnderecoLocal);
+    }
+    printf("   RTPR %d\n",qtdParams);
+
+    for (int i = 0; i < PRIME_NUMBER; i++)
+    {
+        for (TNo *p = tabelaSimbolos.tabela[i]; p != NULL; p = p->prox)
+        {
+            if (p->escopo == ESCOPO_LOCAL)
+                p->fechado = 1;
+        }
+    }
+    escopoAtual = ESCOPO_GLOBAL;
 }
 
 // <tipo> ::= caractere | inteiro | logico
@@ -819,12 +1149,14 @@ void parametros_formais(void)
 // <parâmetro_formal> ::= [var] <lista_variaveis>
 void parametro_formal(void)
 {
+    paramRef = 0;
     if (lookahead == VAR)
     {
+        paramRef = 1;
         consome(VAR);
     }
 
-    lista_variaveis();
+    lista_variaveis(CAT_PARAMETRO);
 }
 
 void comando_composto(void)
@@ -845,11 +1177,13 @@ void comando(void)
 {
     if (lookahead == IDENTIFICADOR)
     {
+        strcpy(idComando, info_atomo.atributo.id);
+        linhaComando = info_atomo.linha;
         consome(IDENTIFICADOR);
 
         if (lookahead == ATRIBUICAO)
         {
-            comando_atribuicao(); 
+            comando_atribuicao();
         }
         else
         {
@@ -881,32 +1215,133 @@ void comando(void)
 // <comando_atribuição> ::= identificador ‘:=’ <expressão> 
 void comando_atribuicao(void)
 {
+    TNo *s = buscaTS(idComando, escopoAtual);
+    if (s == NULL)
+    {
+        s = buscaTS(idComando, ESCOPO_GLOBAL);
+    }
+    if (s == NULL)
+    {
+        printf("# %d:erro semantico, identificador %s nao declarado\n", linhaComando, idComando);
+        exit(1);
+    }
+    if (s->categoria != CAT_VARIAVEL && s->categoria != CAT_PARAMETRO &&
+        !(s->categoria == CAT_FUNCAO && s == rotinaAtual))
+    {
+        printf("# %d:erro semantico, %s nao e variavel nem parametro\n", linhaComando, idComando);
+        exit(1);
+    }
     consome(ATRIBUICAO);
     expressao();
+    if (s->categoria == CAT_FUNCAO)
+    {
+        printf("   ARMZ 1,%d\n", -(s->nParams + 3));
+    }
+    else
+    {
+        if (s->porRef)
+            printf("   ARMI %d,%d\n", s->escopo, s->endereco);
+        else
+            printf("   ARMZ %d,%d\n", s->escopo, s->endereco);
+    }
 }
 
 // <chamada_procedimento> ::= identificador [ ‘(’ <lista_expressão> ‘)’ ]
 void chamada_procedimento(void)
 {
+    int n = 0;
+    TNo *s = buscaTS(idComando, ESCOPO_GLOBAL);
+
+    if (s == NULL)
+    {
+        printf("# %d:erro semantico, procedimento %s nao declarado\n", linhaComando, idComando);
+        exit(1);
+    }
+    if (s->categoria != CAT_PROCEDIMENTO)
+    {
+        printf("# %d:erro semantico, %s nao e procedimento\n", linhaComando, idComando);
+        exit(1);
+    }
+
     if (lookahead == ABRE_PAR)
     {
         consome(ABRE_PAR);
+        rotinaChamada = s;
         lista_expressao();
+        n = qtdArgs;
         consome(FECHA_PAR);
+    }
+
+    if (n != s->nParams)
+    {
+        printf("# %d:erro semantico, %s espera %d argumento(s), recebeu %d\n",
+               linhaComando, idComando, s->nParams, n);
+        exit(1);
+    }
+    printf("   CHPR L%d\n", s->rotulo);
+    if (n > 0)
+    {
+        printf("   DMEM %d\n", n);
     }
 }
 
 // <comando_entrada> ::= leia ‘(’ identificador { ‘,’ identificador } ‘)’
 void comando_entrada(void)
 {
+    char id[16];
+    int linha;
+    TNo *s;
+
     consome(LEIA);
     consome(ABRE_PAR);
+
+    strcpy(id, info_atomo.atributo.id);
+    linha = info_atomo.linha;
     consome(IDENTIFICADOR);
+    s = buscaTS(id, escopoAtual);
+    if (s == NULL)
+        s = buscaTS(id, ESCOPO_GLOBAL);
+    if (s == NULL)
+    {
+        printf("# %d:erro semantico, identificador %s nao declarado\n", linha, id);
+        exit(1);
+    }
+    if (s->categoria != CAT_VARIAVEL && s->categoria != CAT_PARAMETRO)
+    {
+        printf("# %d:erro semantico, %s nao e variavel nem parametro\n", linha, id);
+        exit(1);
+    }
+    printf("   LEIT\n");
+    if (s->porRef)
+        printf("   ARMI %d,%d\n", s->escopo, s->endereco);
+    else
+        printf("   ARMZ %d,%d\n", s->escopo, s->endereco);
 
     while (lookahead == VIRGULA)
     {
         consome(VIRGULA);
+
+        strcpy(id, info_atomo.atributo.id);
+        linha = info_atomo.linha;
         consome(IDENTIFICADOR);
+        s = buscaTS(id, escopoAtual);
+        if (s == NULL)
+            s = buscaTS(id, ESCOPO_GLOBAL);
+        if (s == NULL)
+        {
+            printf("# %d:erro semantico, identificador %s nao declarado\n", linha, id);
+            exit(1);
+        }
+        if (s->categoria != CAT_VARIAVEL && s->categoria != CAT_PARAMETRO)
+        {
+            printf("# %d:erro semantico, %s nao e variavel nem parametro\n", linha, id);
+            exit(1);
+        }
+        printf("   LEIT\n");
+        if (s->porRef)
+            printf("   ARMI %d,%d\n", s->escopo, s->endereco);
+        else
+            printf("   ARMZ %d,%d\n", s->escopo, s->endereco);
     }
 
     consome(FECHA_PAR);
@@ -917,44 +1352,115 @@ void comando_saida(void)
 {
     consome(ESCREVA);
     consome(ABRE_PAR);
-    lista_expressao();
+    expressao();
+    printf("   IMPR\n");
+    while (lookahead == VIRGULA)
+    {
+        consome(VIRGULA);
+        expressao();
+        printf("   IMPR\n");
+    }
     consome(FECHA_PAR);
 }
 
 // <comando_condicional> ::= se <expressão> entao <comando> [ senao <comando> ] 
 void comando_condicional(void)
 {
+    int L1 = rotulo++;
+    int L2;
+
     consome(SE);
     expressao();
+    printf("   DSVF L%d\n", L1);
     consome(ENTAO);
     comando();
 
     if (lookahead == SENAO)
     {
+        L2 = rotulo++;
+        printf("   DSVS L%d\n", L2);
+        printf("L%d:NADA\n", L1);
         consome(SENAO);
         comando();
+        printf("L%d:NADA\n", L2);
+    }
+    else
+    {
+        printf("L%d:NADA\n", L1);
     }
 }
 
 // <comando_repeticao> ::= enquanto <expressão> faca <comando> 
 void comando_repeticao(void)
 {
+    int L1 = rotulo++;
+    int L2 = rotulo++;
+
     consome(ENQUANTO);
+    printf("L%d:NADA\n", L1);
     expressao();
+    printf("   DSVF L%d\n", L2);
     consome(FACA);
     comando();
+    printf("   DSVS L%d\n", L1);
+    printf("L%d:NADA\n", L2);
 }
 
 // <lista_expressão> ::= <expressão> { ‘,’ <expressão> } 
 void lista_expressao(void)
 {
-    expressao();
+    TNo *rot = rotinaChamada;
+    int cont = 0;
+    char id[16];
+    int linha;
+    TNo *s;
 
-    while (lookahead == VIRGULA)
+    while (1)
     {
-        consome(VIRGULA);
-        expressao();
+        if (rot != NULL && cont < 32 && rot->refs[cont])
+        {
+            // parametro por referencia: o argumento deve ser uma variavel
+            if (lookahead != IDENTIFICADOR)
+            {
+                printf("# %d:erro semantico, argumento %d de %s deve ser variavel (parametro por referencia)\n",
+                       info_atomo.linha, cont + 1, rot->id);
+                exit(1);
+            }
+            strcpy(id, info_atomo.atributo.id);
+            linha = info_atomo.linha;
+            consome(IDENTIFICADOR);
+            s = buscaTS(id, escopoAtual);
+            if (s == NULL)
+                s = buscaTS(id, ESCOPO_GLOBAL);
+            if (s == NULL)
+            {
+                printf("# %d:erro semantico, identificador %s nao declarado\n", linha, id);
+                exit(1);
+            }
+            if ((s->categoria != CAT_VARIAVEL && s->categoria != CAT_PARAMETRO) ||
+                (lookahead != VIRGULA && lookahead != FECHA_PAR))
+            {
+                printf("# %d:erro semantico, argumento %d de %s deve ser variavel (parametro por referencia)\n",
+                       linha, cont + 1, rot->id);
+                exit(1);
+            }
+            if (s->porRef)
+                printf("   CRVL %d,%d\n", s->escopo, s->endereco);
+            else
+                printf("   CREN %d,%d\n", s->escopo, s->endereco);
+        }
+        else
+        {
+            expressao();
+        }
+        cont++;
+
+        if (lookahead == VIRGULA)
+            consome(VIRGULA);
+        else
+            break;
     }
+    qtdArgs = cont;
 }
 
 // <expressão> ::= <expressão_simples> [ <operador_relacional> <expressão_simples> ] 
@@ -969,8 +1475,33 @@ void expressao(void)
         lookahead == MAIOR ||
         lookahead == IGUAL)
     {
+        TAtomo op = lookahead;
         operador_relacional();
         expressao_simples();
+        if (op == MENOR)
+        {
+            printf("   CMME\n");
+        }
+        else if (op == MENOR_IGUAL)
+        {
+            printf("   CMEG\n");
+        }
+        else if (op == MAIOR)
+        {
+            printf("   CMMA\n");
+        }
+        else if (op == MAIOR_IGUAL)
+        {
+            printf("   CMAG\n");
+        }
+        else if (op == IGUAL)
+        {
+            printf("   CMIG\n");
+        }
+        else
+        {
+            printf("   CMDG\n");
+        }
     }
 }
 
@@ -998,8 +1529,27 @@ void expressao_simples(void)
            lookahead == MOD ||
            lookahead == OU)
     {
+        TAtomo op = lookahead;
+        int linha = info_atomo.linha;
         operador_adicao();
         termo();
+        if (op == MAIS)
+        {
+            printf("   SOMA\n");
+        }
+        else if (op == MENOS)
+        {
+            printf("   SUBT\n");
+        }
+        else if (op == OU)
+        {
+            printf("   DISJ\n");
+        }
+        else
+        {
+            printf("# %d:erro semantico, operador mod nao e suportado pela MEPA\n", linha);
+            exit(1);
+        }
     }
 }
 
@@ -1029,12 +1579,24 @@ void termo(void)
 {
     fator();
 
-    while (lookahead == MULT ||
-           lookahead == DIV ||
-           lookahead == E)
+    while (lookahead == MULT || lookahead == DIV || lookahead == E)
     {
+        TAtomo op = lookahead;
         operador_multiplicacao();
         fator();
+
+        if (op == MULT)
+        {
+            printf("   MULT\n");
+        }
+        else if (op == DIV)
+        {
+            printf("   DIVI\n");
+        }
+        else
+        {
+            printf("   CONJ\n");
+        }
     }
 }
 
@@ -1060,22 +1622,69 @@ void fator(void)
 {
     if (lookahead == IDENTIFICADOR)
     {
+        char id[16];
+        int linha = info_atomo.linha;
+        TNo *s;
+
+        strcpy(id, info_atomo.atributo.id);
         consome(IDENTIFICADOR);
+
+        s = buscaTS(id, escopoAtual);
+        if (s == NULL)
+        {
+            s = buscaTS(id, ESCOPO_GLOBAL);
+        }
+        if (s == NULL)
+        {
+            printf("# %d:erro semantico, identificador %s nao declarado\n", linha, id);
+            exit(1);
+        }
 
         if (lookahead == ABRE_PAR)
         {
+            if (s->categoria != CAT_FUNCAO)
+            {
+                printf("# %d:erro semantico, %s nao e funcao\n", linha, id);
+                exit(1);
+            }
+            printf("   AMEM 1\n");
             consome(ABRE_PAR);
+            rotinaChamada = s;
             lista_expressao();
+            if (qtdArgs != s->nParams)
+            {
+                printf("# %d:erro semantico, %s espera %d argumento(s), recebeu %d\n",
+                       linha, id, s->nParams, qtdArgs);
+                exit(1);
+            }
             consome(FECHA_PAR);
+            printf("   CHPR L%d\n", s->rotulo);
+            printf("   DMEM %d\n", s->nParams);
+        }
+        else
+        {
+            if (s->categoria != CAT_VARIAVEL && s->categoria != CAT_PARAMETRO)
+            {
+                printf("# %d:erro semantico, %s nao e variavel nem parametro\n", linha, id);
+                exit(1);
+            }
+            if (s->porRef)
+                printf("   CRVI %d,%d\n", s->escopo, s->endereco);
+            else
+                printf("   CRVL %d,%d\n", s->escopo, s->endereco);
         }
     }
     else if (lookahead == CONSTINT)
     {
+        int valor = info_atomo.atributo.numero;  // guarda ANTES do consome
         consome(CONSTINT);
+        printf("   CRCT %d\n", valor);
     }
     else if (lookahead == CONSTCHAR)
     {
+        int valor = (unsigned char)info_atomo.atributo.ch;
         consome(CONSTCHAR);
+        printf("   CRCT %d\n", valor); // codigo ascii
     }
     else if (lookahead == ABRE_PAR)
     {
@@ -1087,15 +1696,26 @@ void fator(void)
              lookahead == MENOS ||
              lookahead == NAO)
     {
+        TAtomo op = lookahead;
         consome(lookahead);
         fator();
+        if (op == MENOS)
+        {
+            printf("   INVR\n");
+        }
+        else if (op == NAO)
+        {
+            printf("   NEGA\n");
+        }
     }
     else if (lookahead == VERDADEIRO)
     {
         consome(VERDADEIRO);
+        printf("   CRCT 1\n");
     }
     else
     {
         consome(FALSO);
+        printf("   CRCT 0\n");
     }
 }

@@ -1,8 +1,17 @@
-algoritmo teste;
-
-var
-    x: inteiro;
-
+algoritmo exercicio3;
+var g: inteiro;
+procedimento fat(n: inteiro)
+var aux: inteiro;
 inicio
-    x := 12E2
+  se n = 1 entao
+    g := n
+  senao
+  inicio
+    fat(n - 1);
+    g := n * g
+  fim
+fim
+inicio
+  fat(4);
+  escreva(g)
 fim.
